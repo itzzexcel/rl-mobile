@@ -1,0 +1,7 @@
+--- a/com/tidal/android/feature/playerscreen/ui/PlayerScreenKt.smali
++++ b/com/tidal/android/feature/playerscreen/ui/PlayerScreenKt.smali
+@@ -7265,2 +7265,4 @@
++    invoke-static {v7}, Lradiant/KaraokeButton;->a(Landroidx/compose/runtime/Composer;)V
++
+     .line 366
+     iget-object v2, v11, Lcom/tidal/android/feature/playerscreen/ui/s$a;->m:Lcom/tidal/android/feature/playerscreen/ui/p;

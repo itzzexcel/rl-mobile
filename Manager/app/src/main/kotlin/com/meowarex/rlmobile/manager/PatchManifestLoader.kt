@@ -11,6 +11,7 @@ import com.meowarex.rlmobile.network.utils.SemVer
 import com.meowarex.rlmobile.network.utils.getOrThrow
 import com.meowarex.rlmobile.ui.screens.patchopts.PatchManifest
 import com.meowarex.rlmobile.ui.screens.patchopts.PatchSpec
+import com.meowarex.rlmobile.ui.screens.patchopts.withLocalKaraokePatch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -36,6 +37,7 @@ class PatchManifestLoader(
                 .patches
                 .sortedBy { it.order }   // manifest is authoritative for UI order (not KnownPatch)
                 .takeIf { it.isNotEmpty() }
+                ?.withLocalKaraokePatch()
         } catch (t: Throwable) {
             Log.w(BuildConfig.TAG, "Failed to parse $MANIFEST_NAME in ${file.name}", t)
             null

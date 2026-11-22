@@ -9,10 +9,13 @@ import com.meowarex.rlmobile.patcher.steps.base.IDexProvider
 import com.meowarex.rlmobile.patcher.steps.base.Step
 import com.meowarex.rlmobile.patcher.steps.download.CopyDependenciesStep
 import com.meowarex.rlmobile.patcher.steps.download.DownloadPatchesStep
+import com.meowarex.rlmobile.ui.screens.patchopts.AVRCP_SEEK_PATCH_ID
+import com.meowarex.rlmobile.ui.screens.patchopts.KARAOKE_NPU_PATCH_ID
 import com.meowarex.rlmobile.ui.screens.patchopts.PatchManifest
 import com.meowarex.rlmobile.ui.screens.patchopts.PatchOptions
 import com.meowarex.rlmobile.ui.screens.patchopts.PatchSpec
 import com.meowarex.rlmobile.ui.screens.patchopts.builtinPatchSpecs
+import com.meowarex.rlmobile.ui.screens.patchopts.withLocalKaraokePatch
 import com.android.tools.smali.baksmali.Baksmali
 import com.android.tools.smali.baksmali.BaksmaliOptions
 import com.android.tools.smali.dexlib2.Opcodes
@@ -61,7 +64,7 @@ class SmaliPatchStep(
             container.log("Failed to parse manifest.json (${t.message}); using built-in patch specs")
             null
         }
-        specs = manifestSpecs ?: builtinPatchSpecs(context, json)
+        specs = (manifestSpecs ?: builtinPatchSpecs(context, json)).withLocalKaraokePatch()
         container.log(
             "Loaded ${specs.size} patch specs from " +
                 if (manifestSpecs != null) "manifest.json" else "built-in list"
@@ -190,6 +193,41 @@ class SmaliPatchStep(
                     throw Error("Failed to parse patch file $patchFile", t)
                 }
             }
+        }
+
+        // Bundle local Karaoke QNN audio hook smali & patches when enabled
+        val karaokeSpec = specs.firstOrNull { it.id == KARAOKE_NPU_PATCH_ID }
+        val karaokeEnabled = karaokeSpec == null || options.isEnabled(karaokeSpec)
+        if (karaokeEnabled) {
+            try {
+                val radiantAssets = context.assets.list("karaoke-patch/radiant").orEmpty()
+                val radiantDir = smaliDir.resolve("radiant").apply { mkdirs() }
+                for (name in radiantAssets) {
+                    if (!name.endsWith(".smali")) continue
+                    context.assets.open("karaoke-patch/radiant/$name").use { input ->
+                        radiantDir.resolve(name).outputStream().use { input.copyTo(it) }
+                    }
+                    container.log("Extracted bundled karaoke smali: radiant/$name")
+                }
+                loadBundledAssetPatches("karaoke-patch", patches, container)
+            } catch (t: Throwable) {
+                container.log("Skipping bundled Karaoke QNN audio patch (${t.message})")
+            }
+        } else {
+            container.log("Skipping disabled local patch: Karaoke (Hexagon NPU)")
+        }
+
+        // Bundle local Bluetooth AVRCP Fast Forward / Rewind MediaSession patch when enabled
+        val avrcpSpec = specs.firstOrNull { it.id == AVRCP_SEEK_PATCH_ID }
+        val avrcpEnabled = avrcpSpec == null || options.isEnabled(avrcpSpec)
+        if (avrcpEnabled) {
+            try {
+                loadBundledAssetPatches("avrcp-seek-patch", patches, container)
+            } catch (t: Throwable) {
+                container.log("Skipping bundled AVRCP seek patch (${t.message})")
+            }
+        } else {
+            container.log("Skipping disabled local patch: Bluetooth Fast Forward / Rewind")
         }
 
         // Disassemble all the classes
@@ -392,6 +430,35 @@ class SmaliPatchStep(
             if (target[pos + i] != line) return false
         }
         return true
+    }
+
+    private fun loadBundledAssetPatches(
+        assetDir: String,
+        patches: MutableList<LoadedPatch>,
+        container: StepRunner,
+    ) {
+        for (patchName in context.assets.list(assetDir).orEmpty().sorted()) {
+            if (!patchName.endsWith(".patch")) continue
+            context.assets.open("$assetDir/$patchName").use { input ->
+                val patchText = input.bufferedReader().readText()
+                    .replace("\r\n", "\n")
+                    .trimEnd { it == '\n' }
+                for (section in splitMultiTargetPatch(patchText.split('\n'))) {
+                    val targetLine = section.first { it.startsWith("--- a/") }
+                    val fullClassName = targetLine
+                        .removePrefix("--- a/")
+                        .removeSuffix(".smali")
+                        .trim()
+                    patches.add(
+                        LoadedPatch(
+                            fullClassName = fullClassName,
+                            patch = UnifiedDiffUtils.parseUnifiedDiff(section),
+                        )
+                    )
+                    container.log("Loaded bundled patch ($assetDir/$patchName) for $fullClassName")
+                }
+            }
+        }
     }
 
     private companion object {

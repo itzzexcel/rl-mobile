@@ -39,6 +39,7 @@ import com.meowarex.rlmobile.ui.theme.radiantSurface
 import com.meowarex.rlmobile.ui.theme.glassSurface
 import com.meowarex.rlmobile.ui.components.NewPin
 import com.meowarex.rlmobile.ui.components.TitleWithNewPin
+import com.meowarex.rlmobile.ui.screens.patchopts.KARAOKE_NPU_PATCH_ID
 import com.meowarex.rlmobile.ui.screens.patchopts.LocalPatchChanges
 import com.meowarex.rlmobile.ui.screens.patchopts.OptionSpec
 import com.meowarex.rlmobile.ui.screens.patchopts.conflictingChoices
@@ -185,8 +186,9 @@ fun PatchSelectionList(
         val inlineOptions = patch.advancedOptions.filter { it.isInline }
         val hasSheetOptions = patch.advancedOptions.any { !it.isInline }
         val companionApp = patch.companionApp
+        val isKaraokePatch = patch.id == KARAOKE_NPU_PATCH_ID
         val hasSettings = patch.variants.isNotEmpty() || inlineOptions.isNotEmpty() || hasSheetOptions ||
-            companionApp != null
+            companionApp != null || isKaraokePatch
 
         // When a patch is enabled and has settings show a carded view of the settings
         val carded = checked && hasSettings
@@ -303,6 +305,10 @@ fun PatchSelectionList(
                                     onClick = { advancedFor = patch },
                                 )
                             }
+                        }
+
+                        if (isKaraokePatch) {
+                            KaraokePatchControls()
                         }
 
                         if (companionApp != null) {

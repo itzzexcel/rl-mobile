@@ -1,0 +1,64 @@
+--- a/com/aspiro/wamp/player/n0.smali
++++ b/com/aspiro/wamp/player/n0.smali
+@@ -143,30 +143,6 @@
+ 
+     .line 2
+     .line 3
+-    iget-object v1, v0, Lcom/aspiro/wamp/player/c;->l:Lcom/aspiro/wamp/player/l0;
+-
+-    .line 4
+-    .line 5
+-    invoke-interface {v1}, Lcom/aspiro/wamp/player/l0;->getPlayQueue()Lcom/aspiro/wamp/playqueue/t;
+-
+-    .line 6
+-    .line 7
+-    .line 8
+-    move-result-object v1
+-
+-    .line 9
+-    invoke-interface {v1}, Lcom/aspiro/wamp/playqueue/t;->canSeekBackOrForward()Z
+-
+-    .line 10
+-    .line 11
+-    .line 12
+-    move-result v1
+-
+-    .line 13
+-    if-eqz v1, :cond_0
+-
+-    .line 14
+-    .line 15
+     iget-object v0, v0, Lcom/aspiro/wamp/player/c;->l:Lcom/aspiro/wamp/player/l0;
+ 
+     .line 16
+@@ -206,30 +182,6 @@
+ 
+     .line 2
+     .line 3
+-    iget-object v1, v0, Lcom/aspiro/wamp/player/c;->l:Lcom/aspiro/wamp/player/l0;
+-
+-    .line 4
+-    .line 5
+-    invoke-interface {v1}, Lcom/aspiro/wamp/player/l0;->getPlayQueue()Lcom/aspiro/wamp/playqueue/t;
+-
+-    .line 6
+-    .line 7
+-    .line 8
+-    move-result-object v1
+-
+-    .line 9
+-    invoke-interface {v1}, Lcom/aspiro/wamp/playqueue/t;->canSeekBackOrForward()Z
+-
+-    .line 10
+-    .line 11
+-    .line 12
+-    move-result v1
+-
+-    .line 13
+-    if-eqz v1, :cond_0
+-
+-    .line 14
+-    .line 15
+     iget-object v0, v0, Lcom/aspiro/wamp/player/c;->l:Lcom/aspiro/wamp/player/l0;
+ 
+     .line 16

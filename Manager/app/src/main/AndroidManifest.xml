@@ -14,6 +14,10 @@
   <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
   <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission
+      android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
+      tools:ignore="ForegroundServicePermission" />
   <uses-permission
       android:name="android.permission.REQUEST_INSTALL_PACKAGES"
       tools:ignore="RequestInstallPackagesPolicy" />
@@ -40,6 +44,12 @@
       android:theme="@style/Theme.AppCompat.NoActionBar"
       tools:targetApi="29">
 
+    <!-- Qualcomm Hexagon HTP NPU (FastRPC) & Adreno OpenCL vendor public libraries -->
+    <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+    <uses-native-library android:name="libadsprpc.so" android:required="false" />
+    <uses-native-library android:name="libsdsprpc.so" android:required="false" />
+    <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
     <receiver
         android:name=".installers.pm.PMIntentReceiver"
         android:exported="false" />
@@ -59,6 +69,21 @@
         <action android:name="io.rebble.pebblekit2.RECEIVE_DATA_FROM_WATCH" />
       </intent-filter>
     </service>
+
+    <service
+        android:name=".karaoke.KaraokeForegroundService"
+        android:exported="false"
+        android:foregroundServiceType="specialUse">
+      <property
+          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+          android:value="On-device Qualcomm QNN/Hexagon NPU real-time karaoke vocal separation service" />
+    </service>
+
+    <!-- Karaoke QNN Hexagon HTP relay, bound on-demand by patched TIDAL via Binder + SharedMemory -->
+    <service
+        android:name=".karaoke.KaraokeRelayService"
+        android:exported="true"
+        tools:ignore="ExportedService" />
 
     <provider
         android:name="androidx.core.content.FileProvider"

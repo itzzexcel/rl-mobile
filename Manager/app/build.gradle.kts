@@ -75,6 +75,10 @@ android {
         if (isRelease && !hasReleaseSigning)
             error("Missing keystore in a release workflow!")
 
+        debug {
+            applicationIdSuffix = ".qnn"
+        }
+
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -125,8 +129,8 @@ android {
             // x86 is dead
             excludes += "/lib/x86/*.so"
 
-            // Equivalent of AndroidManifest's extractNativeLibs=false
-            useLegacyPackaging = false
+            // Required so Qualcomm Hexagon DSP / libQnnHtp.so can dlopen libQnnHtpV*Stub.so from nativeLibraryDir
+            useLegacyPackaging = true
         }
     }
 
@@ -235,6 +239,9 @@ dependencies {
     implementation(libs.compose.shimmer)
     implementation(libs.libsu)
     implementation(libs.zip)
+    implementation(libs.onnxruntime.android.qnn)
+
+    testImplementation("junit:junit:4.13.2")
 
     coreLibraryDesugaring(libs.desugaring)
 }

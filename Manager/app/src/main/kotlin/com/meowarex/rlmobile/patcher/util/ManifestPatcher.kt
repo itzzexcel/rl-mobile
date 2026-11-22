@@ -21,8 +21,9 @@ object ManifestPatcher {
     private const val WAZE_PACKAGE = "com.waze"
     private const val WAZE_INIT_RECEIVER = "radiant.WazeInitReceiver"
     private const val WAZE_ACTION_INIT = "com.waze.sdk.audio.ACTION_INIT"
-    // Pebble bridge binds to the Manager
+    // Pebble & Karaoke bridges bind to the Manager
     private const val MANAGER_PACKAGE = "com.meowarex.rlmobile"
+    private const val MANAGER_QNN_PACKAGE = "com.meowarex.rlmobile.qnn"
 
     fun patchManifest(
         manifestBytes: ByteArray,
@@ -94,11 +95,12 @@ object ManifestPatcher {
                             "queries" -> object : NodeVisitor(nv) {
                                 private var hasWazePackage = false
                                 private var hasManagerPackage = false
+                                private var hasQnnManagerPackage = false
 
                                 override fun child(ns: String?, name: String): NodeVisitor {
                                     val visitor = super.child(ns, name)
 
-                                    return if ((enableWazeIntegration || enablePebbleIntegration) && name == "package") {
+                                    return if (name == "package") {
                                         object : NodeVisitor(visitor) {
                                             override fun attr(
                                                 ns: String?,
@@ -112,6 +114,9 @@ object ManifestPatcher {
                                                 }
                                                 if (name == "name" && value == MANAGER_PACKAGE) {
                                                     hasManagerPackage = true
+                                                }
+                                                if (name == "name" && value == MANAGER_QNN_PACKAGE) {
+                                                    hasQnnManagerPackage = true
                                                 }
                                                 super.attr(ns, name, resourceId, type, value)
                                             }
@@ -134,7 +139,7 @@ object ManifestPatcher {
                                             end()
                                         }
                                     }
-                                    if (enablePebbleIntegration && !hasManagerPackage) {
+                                    if (!hasManagerPackage) {
                                         super.child(null, "package").apply {
                                             attr(
                                                 ANDROID_NAMESPACE,
@@ -142,6 +147,18 @@ object ManifestPatcher {
                                                 android.R.attr.name,
                                                 TYPE_STRING,
                                                 MANAGER_PACKAGE,
+                                            )
+                                            end()
+                                        }
+                                    }
+                                    if (!hasQnnManagerPackage) {
+                                        super.child(null, "package").apply {
+                                            attr(
+                                                ANDROID_NAMESPACE,
+                                                "name",
+                                                android.R.attr.name,
+                                                TYPE_STRING,
+                                                MANAGER_QNN_PACKAGE,
                                             )
                                             end()
                                         }

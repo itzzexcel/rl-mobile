@@ -219,6 +219,35 @@ data class SmaliEncode(
     }
 }
 
+const val AVRCP_SEEK_PATCH_ID = "avrcp-seek"
+
+val AVRCP_SEEK_PATCH_SPEC = PatchSpec(
+    id = AVRCP_SEEK_PATCH_ID,
+    order = 998,
+    title = "Bluetooth Fast Forward / Rewind",
+    description = "Exposes AVRCP Fast Forward & Rewind (±10s) on TIDAL's MediaSession for all seekable tracks (e.g. Nothing Headphone (1) paddle hold).",
+    defaultEnabled = true,
+    category = PatchSpec.CATEGORY_PATCH,
+)
+
+const val KARAOKE_NPU_PATCH_ID = "karaoke-npu"
+
+val KARAOKE_NPU_PATCH_SPEC = PatchSpec(
+    id = KARAOKE_NPU_PATCH_ID,
+    order = 999,
+    title = "Karaoke (Hexagon NPU)",
+    description = "Real-time on-device vocal removal via Qualcomm QNN-HTP NPU (KARA_2 & Inst_HQ_3), Media3 audio hook, and player quick menu.",
+    defaultEnabled = true,
+    category = PatchSpec.CATEGORY_PATCH,
+)
+
+fun List<PatchSpec>.withLocalKaraokePatch(): List<PatchSpec> {
+    var result = this
+    if (none { it.id == AVRCP_SEEK_PATCH_ID }) result = result + AVRCP_SEEK_PATCH_SPEC
+    if (none { it.id == KARAOKE_NPU_PATCH_ID }) result = result + KARAOKE_NPU_PATCH_SPEC
+    return result
+}
+
 /** Asset filename of the bundled fallback manifest snapshot (a copy of the release manifest.json). */
 const val BUNDLED_MANIFEST_ASSET = "patches-manifest.json"
 
@@ -231,6 +260,7 @@ fun builtinPatchSpecs(context: Context, json: Json): List<PatchSpec> = builtinSp
         .let { json.decodeFromString(PatchManifest.serializer(), it.decodeToString()) }
         .patches
         .sortedBy { it.order }
+        .withLocalKaraokePatch()
         .also { builtinSpecsCache = it }
 } catch (t: Throwable) {
     emptyList()
