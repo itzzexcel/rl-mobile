@@ -32,7 +32,7 @@
         }
     .end annotation
 
-    .line 143
+    .line 176
     iput-object p1, p0, Lradiant/KaraokeBridge$2;->val$ctx:Landroid/content/Context;
 
     iput-object p2, p0, Lradiant/KaraokeBridge$2;->val$msg:Ljava/lang/String;
@@ -47,7 +47,7 @@
 .method public run()V
     .registers 4
 
-    .line 147
+    .line 180
     :try_start_0
     iget-object v0, p0, Lradiant/KaraokeBridge$2;->val$ctx:Landroid/content/Context;
 
@@ -65,13 +65,13 @@
 
     goto :goto_e
 
-    .line 148
+    .line 181
     :catchall_d
     move-exception v0
 
     :goto_e
     nop
 
-    .line 149
+    .line 182
     return-void
 .end method

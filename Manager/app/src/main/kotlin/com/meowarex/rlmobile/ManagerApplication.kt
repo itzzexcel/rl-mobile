@@ -1,6 +1,7 @@
 package com.meowarex.rlmobile
 
 import android.app.Application
+import android.os.Build
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.annotation.DelicateCoilApi
@@ -34,6 +35,7 @@ import org.koin.dsl.module
 class ManagerApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        if (isKaraokeWorkerProcess()) return
 
         startKoin {
             // Android activities & context
@@ -109,5 +111,18 @@ class ManagerApplication : Application() {
         } else {
             UpdateCheckWorker.cancel(this)
         }
+    }
+
+    private fun isKaraokeWorkerProcess(): Boolean {
+        val processName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            getProcessName()
+        } else {
+            try {
+                java.io.File("/proc/self/cmdline").readText().trim { it <= ' ' || it == '\u0000' }
+            } catch (_: Throwable) {
+                ""
+            }
+        }
+        return processName.endsWith(":karaoke")
     }
 }

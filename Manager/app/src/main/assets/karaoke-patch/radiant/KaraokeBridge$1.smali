@@ -21,7 +21,7 @@
 .method constructor <init>()V
     .registers 1
 
-    .line 51
+    .line 56
     invoke-direct {p0}, Ljava/lang/Object;-><init>()V
 
     return-void
@@ -32,33 +32,33 @@
 .method public onServiceConnected(Landroid/content/ComponentName;Landroid/os/IBinder;)V
     .registers 5
 
-    .line 54
+    .line 59
     invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$sfgetLOCK()Ljava/lang/Object;
 
     move-result-object v0
 
     monitor-enter v0
 
-    .line 55
+    .line 60
     :try_start_5
     invoke-static {p2}, Lradiant/KaraokeBridge;->-$$Nest$sfputserviceBinder(Landroid/os/IBinder;)V
 
-    .line 56
+    .line 61
     invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$sfgetLOCK()Ljava/lang/Object;
 
     move-result-object p2
 
     invoke-virtual {p2}, Ljava/lang/Object;->notifyAll()V
 
-    .line 57
+    .line 62
     monitor-exit v0
     :try_end_10
     .catchall {:try_start_5 .. :try_end_10} :catchall_30
 
-    .line 58
+    .line 63
     invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$smqueryStatusAsync()V
 
-    .line 59
+    .line 64
     const-string p2, "RLKaraokeBridge"
 
     invoke-virtual {p1}, Landroid/content/ComponentName;->flattenToShortString()Ljava/lang/String;
@@ -85,10 +85,10 @@
 
     invoke-static {p2, p1}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
 
-    .line 60
+    .line 65
     return-void
 
-    .line 57
+    .line 62
     :catchall_30
     move-exception p1
 
@@ -101,49 +101,101 @@
 .end method
 
 .method public onServiceDisconnected(Landroid/content/ComponentName;)V
-    .registers 3
+    .registers 5
 
-    .line 64
+    .line 71
     invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$sfgetLOCK()Ljava/lang/Object;
 
     move-result-object p1
 
     monitor-enter p1
 
-    .line 65
+    .line 72
     const/4 v0, 0x0
 
     :try_start_6
     invoke-static {v0}, Lradiant/KaraokeBridge;->-$$Nest$sfputserviceBinder(Landroid/os/IBinder;)V
 
-    .line 66
+    .line 73
+    invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$sfgetenabled()Z
+
+    move-result v0
+
+    if-eqz v0, :cond_17
+
+    invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$sfgetintentionalUnbind()Z
+
+    move-result v0
+
+    if-nez v0, :cond_17
+
+    const/4 v0, 0x1
+
+    goto :goto_18
+
+    :cond_17
+    const/4 v0, 0x0
+
+    .line 74
+    :goto_18
+    invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$sfgetboundContext()Landroid/content/Context;
+
+    move-result-object v1
+
+    .line 75
     invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$sfgetLOCK()Ljava/lang/Object;
 
-    move-result-object v0
+    move-result-object v2
 
-    invoke-virtual {v0}, Ljava/lang/Object;->notifyAll()V
+    invoke-virtual {v2}, Ljava/lang/Object;->notifyAll()V
 
-    .line 67
+    .line 76
     monitor-exit p1
-    :try_end_11
-    .catchall {:try_start_6 .. :try_end_11} :catchall_17
+    :try_end_24
+    .catchall {:try_start_6 .. :try_end_24} :catchall_3f
 
-    .line 68
+    .line 77
     const-string p1, "Idle"
 
     invoke-static {p1}, Lradiant/KaraokeBridge;->-$$Nest$sfputlastProvider(Ljava/lang/String;)V
 
-    .line 69
+    .line 78
+    if-eqz v0, :cond_3e
+
+    .line 79
+    const-string p1, "RLKaraokeBridge"
+
+    const-string v0, "KaraokeRelayService disconnected unexpectedly; tripping circuit breaker"
+
+    invoke-static {p1, v0}, Landroid/util/Log;->w(Ljava/lang/String;Ljava/lang/String;)I
+
+    .line 80
+    if-eqz v1, :cond_35
+
+    goto :goto_39
+
+    :cond_35
+    invoke-static {}, Lradiant/KaraokeBridge;->-$$Nest$smappContext()Landroid/content/Context;
+
+    move-result-object v1
+
+    :goto_39
+    const-string p1, "Karaoke NPU crashed \u2014 auto-disabled"
+
+    invoke-static {v1, p1}, Lradiant/KaraokeBridge;->-$$Nest$smtripCircuitBreaker(Landroid/content/Context;Ljava/lang/String;)V
+
+    .line 83
+    :cond_3e
     return-void
 
-    .line 67
-    :catchall_17
+    .line 76
+    :catchall_3f
     move-exception v0
 
-    :try_start_18
+    :try_start_40
     monitor-exit p1
-    :try_end_19
-    .catchall {:try_start_18 .. :try_end_19} :catchall_17
+    :try_end_41
+    .catchall {:try_start_40 .. :try_end_41} :catchall_3f
 
     throw v0
 .end method

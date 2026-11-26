@@ -5,7 +5,6 @@ import android.os.Build
 import android.util.Log
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtLoggingLevel
 import ai.onnxruntime.OrtSession
 import org.json.JSONArray
 import org.json.JSONObject
@@ -32,6 +31,20 @@ class QnnStemSeparator : Closeable {
     companion object {
         private const val TAG = "KaraokeQNN"
         private const val INV_32768 = 1f / 32768f
+
+        internal fun detectHtpArch(socModel: String): String? {
+            val s = socModel.trim().uppercase()
+            return when {
+                s.startsWith("SM8850") || s.startsWith("SM8845") || s.startsWith("QCS8850") -> "81"
+                s.startsWith("SM8750") || s.startsWith("QCS8750") -> "79"
+                s.startsWith("SM8650") || s.startsWith("SM8635") || s.startsWith("QCS8650") -> "75"
+                s.startsWith("SM8550") || s.startsWith("SM8735") || s.startsWith("SM8535") ||
+                    s.startsWith("SM7675") || s.startsWith("QCS8550") -> "73"
+                s.startsWith("SM8450") || s.startsWith("SM8475") -> "69"
+                s.startsWith("SM8350") -> "68"
+                else -> null
+            }
+        }
     }
 
     private val lock = Any()
@@ -41,6 +54,10 @@ class QnnStemSeparator : Closeable {
 
     @Volatile
     var activeProvider: String = "Idle"
+        private set
+
+    @Volatile
+    var lastLoadError: String? = null
         private set
 
     @Volatile
@@ -92,11 +109,25 @@ class QnnStemSeparator : Closeable {
         val normalized = ModelCatalog.normalizeMode(mode)
         synchronized(lock) {
             if (session != null && loadedMode == normalized) {
+                lastLoadError = null
                 return true
             }
+            lastLoadError = null
             val modelFile = ModelCatalog.resolveModelFile(context, normalized)
-            if (!modelFile.exists() || modelFile.length() < 1_000_000L) {
-                Log.w(TAG, "Model missing for mode '$normalized': ${modelFile.absolutePath}")
+            if (!modelFile.exists() || modelFile.length() <= 1_000_000L) {
+                val msg = if (ModelCatalog.hasLegacyFp32Model(context, normalized)) {
+                    "Outdated FP32 model — re-download QNN A16W16 in Manager"
+                } else {
+                    "Model not installed ($normalized)"
+                }
+                lastLoadError = msg
+                Log.w(TAG, "$msg: ${modelFile.absolutePath}")
+                return false
+            }
+            if (!ModelCatalog.isQuantizedModelFile(modelFile)) {
+                val msg = "Unquantized FP32 model (${modelFile.length() / (1024 * 1024)} MB) is unsupported on-device — re-download QNN A16W16 in Manager"
+                lastLoadError = msg
+                Log.w(TAG, "$msg: ${modelFile.absolutePath}")
                 return false
             }
 
@@ -128,7 +159,7 @@ class QnnStemSeparator : Closeable {
         spec: MdxModelSpec
     ): Pair<OrtSession, String>? {
         val nativeDir = context.applicationInfo.nativeLibraryDir
-        val dspLibPath = "$nativeDir;/vendor/dsp/cdsp;/vendor/lib/rfsa/adsp;/system/lib/rfsa/adsp;/dsp"
+        val dspLibPath = "$nativeDir;/vendor/dsp/cdsp;/vendor/lib/rfsa/adsp;/vendor/lib64/rfsa/adsp;/system/vendor/lib/rfsa/adsp;/system/lib/rfsa/adsp;/dsp"
         for (envVar in listOf("ADSP_LIBRARY_PATH", "CDSP_LIBRARY_PATH")) {
             try {
                 android.system.Os.setenv(envVar, dspLibPath, true)
@@ -137,36 +168,35 @@ class QnnStemSeparator : Closeable {
             }
         }
 
+        var lastErr: String? = null
+
         fun tryCreateQnnSession(
             label: String,
             path: String,
             qnnOpts: Map<String, String>,
             strict: Boolean,
-            ctxOutFile: File? = null,
-            verbose: Boolean = false
+            ctxOutFile: File? = null
         ): Pair<OrtSession, String>? {
             return try {
-                val opts = OrtSession.SessionOptions().apply {
-                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-                    setSymbolicDimensionValue("batch_size", 1L)
-                    if (verbose) {
-                        setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_INFO)
-                    }
+                OrtSession.SessionOptions().use { opts ->
+                    opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                    opts.setSymbolicDimensionValue("batch_size", 1L)
                     if (strict) {
-                        addConfigEntry("session.disable_cpu_ep_fallback", "1")
+                        opts.addConfigEntry("session.disable_cpu_ep_fallback", "1")
                     }
                     if (ctxOutFile != null) {
                         if (ctxOutFile.exists()) ctxOutFile.delete()
-                        addConfigEntry("ep.context_enable", "1")
-                        addConfigEntry("ep.context_embed_mode", "1")
-                        addConfigEntry("ep.context_file_path", ctxOutFile.absolutePath)
+                        opts.addConfigEntry("ep.context_enable", "1")
+                        opts.addConfigEntry("ep.context_embed_mode", "1")
+                        opts.addConfigEntry("ep.context_file_path", ctxOutFile.absolutePath)
                     }
-                    addQnn(qnnOpts)
+                    opts.addQnn(qnnOpts)
+                    val s = ortEnv.createSession(path, opts)
+                    s to label
                 }
-                val s = ortEnv.createSession(path, opts)
-                s to label
             } catch (t: Throwable) {
-                Log.w(TAG, "$label init failed ($qnnOpts): ${t.message}")
+                lastErr = t.message ?: t.javaClass.simpleName
+                Log.w(TAG, "$label init failed ($qnnOpts): $lastErr")
                 if (ctxOutFile != null && ctxOutFile.exists() && ctxOutFile.length() < 100_000L) {
                     ctxOutFile.delete()
                 }
@@ -174,72 +204,44 @@ class QnnStemSeparator : Closeable {
             }
         }
 
-        // 1. Qualcomm QNN Hexagon HTP NPU (libQnnHtp.so) - GPU EP intentionally excluded to avoid UI/SurfaceFlinger stalls
-        val qdqHtpOpts = mapOf(
+        val qdqHtpAutoOpts = mapOf(
             "backend_type" to "htp",
             "htp_performance_mode" to "sustained_high_performance",
-            "htp_graph_finalization_optimization_mode" to "2"
+            "htp_graph_finalization_optimization_mode" to "1",
+            "vtcm_mb" to "8"
         )
-        val qdqHtpExplicitOpts = mapOf(
-            "backend_path" to File(nativeDir, "libQnnHtp.so").absolutePath,
-            "htp_arch" to "73",
-            "htp_performance_mode" to "sustained_high_performance",
-            "htp_graph_finalization_optimization_mode" to "2"
-        )
-        val fp16HtpOpts = mapOf(
-            "backend_type" to "htp",
-            "htp_performance_mode" to "sustained_high_performance",
-            "htp_graph_finalization_optimization_mode" to "2",
-            "enable_htp_fp16_precision" to "1"
-        )
+        val detectedArch = detectHtpArch(Build.SOC_MODEL)
+        val qdqHtpExplicitOpts = buildMap {
+            put("backend_path", File(nativeDir, "libQnnHtp.so").absolutePath)
+            if (detectedArch != null) {
+                put("htp_arch", detectedArch)
+            }
+            put("htp_performance_mode", "sustained_high_performance")
+            put("htp_graph_finalization_optimization_mode", "1")
+            put("vtcm_mb", "8")
+        }
 
         val ctxDir = File(context.cacheDir, "qnn_ctx").apply { mkdirs() }
-        val ctxOnnx = File(ctxDir, "${spec.mode}_qdq_${modelFile.length()}_${spec.hash8}.onnx")
+        val socSafe = Build.SOC_MODEL.uppercase().replace(Regex("[^A-Z0-9_-]"), "").ifBlank { "SOC" }
+        val ctxOnnx = File(ctxDir, "${spec.mode}_qdq_${socSafe}_o1_${modelFile.length()}_${spec.hash8}.onnx")
         if (ctxOnnx.exists() && ctxOnnx.length() > 100_000L) {
-            tryCreateQnnSession("QNN-HTP", ctxOnnx.absolutePath, qdqHtpOpts, strict = true)?.let {
+            tryCreateQnnSession("QNN-HTP", ctxOnnx.absolutePath, qdqHtpAutoOpts, strict = true)?.let {
                 Log.i(TAG, "Loaded QNN-HTP cached context binary: ${ctxOnnx.name}")
                 return it
             }
             ctxOnnx.delete()
         }
 
-        tryCreateQnnSession("QNN-HTP", modelFile.absolutePath, qdqHtpOpts, strict = true, ctxOutFile = ctxOnnx)?.let {
+        tryCreateQnnSession("QNN-HTP", modelFile.absolutePath, qdqHtpAutoOpts, strict = true, ctxOutFile = ctxOnnx)?.let {
             return it
         }
         tryCreateQnnSession("QNN-HTP", modelFile.absolutePath, qdqHtpExplicitOpts, strict = true, ctxOutFile = ctxOnnx)?.let {
             return it
         }
-        tryCreateQnnSession("QNN-HTP", modelFile.absolutePath, fp16HtpOpts, strict = true)?.let {
-            return it
-        }
-        tryCreateQnnSession("QNN-HTP-Hybrid", modelFile.absolutePath, qdqHtpOpts, strict = false, verbose = true)?.let {
-            return it
-        }
 
-        // 2. Android NNAPI
-        try {
-            val opts = OrtSession.SessionOptions().apply {
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-                addNnapi()
-            }
-            val s = ortEnv.createSession(modelFile.absolutePath, opts)
-            return s to "NNAPI"
-        } catch (t: Throwable) {
-            Log.w(TAG, "NNAPI init failed: ${t.message}")
-        }
-
-        // 4. ORT CPU fallback
-        return try {
-            val opts = OrtSession.SessionOptions().apply {
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-                setIntraOpNumThreads(4)
-            }
-            val s = ortEnv.createSession(modelFile.absolutePath, opts)
-            s to "CPU"
-        } catch (t: Throwable) {
-            Log.e(TAG, "All ORT providers failed: ${t.message}", t)
-            null
-        }
+        lastLoadError = "QNN-HTP init failed on ${Build.SOC_MODEL.ifBlank { Build.BOARD }}: ${lastErr ?: "unknown"}"
+        Log.e(TAG, lastLoadError!!)
+        return null
     }
 
     private fun allocateWorkspaceLocked(spec: MdxModelSpec) {
@@ -620,6 +622,7 @@ class QnnStemSeparator : Closeable {
                     entry.put("ok", ok && rms > 1e-5 && zeroPeak == 0 && buzzHarmMaxPcm < 5.0)
                     if (!ok || rms <= 1e-5 || zeroPeak != 0 || buzzHarmMaxPcm >= 5.0) allPassed = false
                 } else {
+                    entry.put("error", lastLoadError ?: "QNN-HTP init failed")
                     allPassed = false
                 }
                 onnxResults.put(entry)

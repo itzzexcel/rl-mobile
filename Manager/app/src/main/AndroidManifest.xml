@@ -83,6 +83,7 @@
     <service
         android:name=".karaoke.KaraokeRelayService"
         android:exported="true"
+        android:process=":karaoke"
         tools:ignore="ExportedService" />
 
     <provider

@@ -11,6 +11,7 @@ import java.net.URL
 data class MdxModelSpec(
     val mode: String,
     val fileName: String,
+    val legacyFileName: String,
     val downloadUrl: String,
     val dimF: Int,
     val dimT: Int,
@@ -24,11 +25,13 @@ data class MdxModelSpec(
 object ModelCatalog {
     private const val TAG = "KaraokeModels"
     private const val MIN_MODEL_BYTES = 1_000_000L
+    const val MAX_QUANTIZED_MODEL_BYTES = 42_000_000L
 
     val KARAOKE_SPEC = MdxModelSpec(
         mode = "karaoke",
-        fileName = "UVR_MDXNET_KARA_2.onnx",
-        downloadUrl = "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_KARA_2.onnx",
+        fileName = "UVR_MDXNET_KARA_2_qnn_a16w16.onnx",
+        legacyFileName = "UVR_MDXNET_KARA_2.onnx",
+        downloadUrl = "https://github.com/itzzexcel/rl-mobile/releases/download/karaoke-models-a16w16/UVR_MDXNET_KARA_2_qnn_a16w16.onnx",
         dimF = 2048,
         dimT = 256,
         nFft = 5120,
@@ -40,8 +43,9 @@ object ModelCatalog {
 
     val INSTRUMENTAL_SPEC = MdxModelSpec(
         mode = "instrumental",
-        fileName = "UVR-MDX-NET-Inst_HQ_3.onnx",
-        downloadUrl = "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx",
+        fileName = "UVR-MDX-NET-Inst_HQ_3_qnn_a16w16.onnx",
+        legacyFileName = "UVR-MDX-NET-Inst_HQ_3.onnx",
+        downloadUrl = "https://github.com/itzzexcel/rl-mobile/releases/download/karaoke-models-a16w16/UVR-MDX-NET-Inst_HQ_3_qnn_a16w16.onnx",
         dimF = 3072,
         dimT = 256,
         nFft = 6144,
@@ -60,35 +64,57 @@ object ModelCatalog {
     fun getAppModelsDir(context: Context): File =
         File(context.getExternalFilesDir(null) ?: context.filesDir, "models")
 
+    fun isQuantizedModelFile(file: File): Boolean =
+        file.exists() && file.length() in (MIN_MODEL_BYTES + 1)..MAX_QUANTIZED_MODEL_BYTES
+
+    fun hasLegacyFp32Model(context: Context, mode: String?): Boolean {
+        val spec = getSpec(mode)
+        val sdcardDir = File(Environment.getExternalStorageDirectory(), "RadiantLyrics/models")
+        val appDir = getAppModelsDir(context)
+        return listOf(
+            File(sdcardDir, spec.fileName),
+            File(appDir, spec.fileName),
+            File(sdcardDir, spec.legacyFileName),
+            File(appDir, spec.legacyFileName)
+        ).any { it.exists() && it.length() > MAX_QUANTIZED_MODEL_BYTES }
+    }
+
     fun resolveModelFile(context: Context, mode: String?): File {
         val spec = getSpec(mode)
         val sdcardDir = File(Environment.getExternalStorageDirectory(), "RadiantLyrics/models")
-        val sdcardFile = File(sdcardDir, spec.fileName)
-        if (sdcardFile.exists() && sdcardFile.length() > MIN_MODEL_BYTES) {
-            return sdcardFile
-        }
-        return File(getAppModelsDir(context), spec.fileName)
+        val appDir = getAppModelsDir(context)
+        val candidates = listOf(
+            File(sdcardDir, spec.fileName),
+            File(appDir, spec.fileName),
+            File(sdcardDir, spec.legacyFileName),
+            File(appDir, spec.legacyFileName)
+        )
+        candidates.firstOrNull { isQuantizedModelFile(it) }?.let { return it }
+        return File(appDir, spec.fileName)
     }
 
-    fun isModelInstalled(context: Context, mode: String?): Boolean {
-        val f = resolveModelFile(context, mode)
-        return f.exists() && f.length() > MIN_MODEL_BYTES
-    }
+    fun isModelInstalled(context: Context, mode: String?): Boolean =
+        isQuantizedModelFile(resolveModelFile(context, mode))
 
     fun getModelSizeMb(context: Context, mode: String?): Double {
         val f = resolveModelFile(context, mode)
-        if (!f.exists() || f.length() <= MIN_MODEL_BYTES) return 0.0
+        if (!isQuantizedModelFile(f)) return 0.0
         return kotlin.math.round((f.length() / (1024.0 * 1024.0)) * 10.0) / 10.0
     }
 
     fun deleteModel(context: Context, mode: String?): Boolean {
         val spec = getSpec(mode)
         var deleted = false
+        val appDir = getAppModelsDir(context)
+        val sdcardDir = File(Environment.getExternalStorageDirectory(), "RadiantLyrics/models")
         val candidates = listOf(
             resolveModelFile(context, mode),
-            File(getAppModelsDir(context), spec.fileName),
-            File(getAppModelsDir(context), "${spec.fileName}.part"),
-            File(Environment.getExternalStorageDirectory(), "RadiantLyrics/models/${spec.fileName}")
+            File(appDir, spec.fileName),
+            File(appDir, "${spec.fileName}.part"),
+            File(appDir, spec.legacyFileName),
+            File(appDir, "${spec.legacyFileName}.part"),
+            File(sdcardDir, spec.fileName),
+            File(sdcardDir, spec.legacyFileName)
         )
         for (file in candidates) {
             if (file.exists() && file.delete()) {
@@ -112,7 +138,7 @@ object ModelCatalog {
         if (!dir.exists()) dir.mkdirs()
 
         val dest = File(dir, spec.fileName)
-        if (dest.exists() && dest.length() > MIN_MODEL_BYTES) {
+        if (isQuantizedModelFile(dest)) {
             onProgress(1f)
             return dest
         }
@@ -157,6 +183,10 @@ object ModelCatalog {
             if (dest.exists()) dest.delete()
             if (!part.renameTo(dest)) {
                 throw IllegalStateException("Failed renaming ${part.name} to ${dest.name}")
+            }
+            File(dir, spec.legacyFileName).takeIf { it.exists() }?.delete()
+            File(context.cacheDir, "qnn_ctx").listFiles()?.forEach { f ->
+                if (f.name.startsWith("${spec.mode}_")) f.delete()
             }
             onProgress(1f)
             Log.i(TAG, "Model downloaded cleanly: ${dest.absolutePath} (${dest.length() / (1024 * 1024)} MB)")

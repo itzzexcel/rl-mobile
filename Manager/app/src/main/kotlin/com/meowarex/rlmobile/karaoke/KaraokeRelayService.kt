@@ -112,10 +112,15 @@ class KaraokeRelayService : Service() {
             mapped = shm.map(OsConstants.PROT_READ or OsConstants.PROT_WRITE, 0, byteCount)
             synchronized(sepLock) {
                 if (!ModelCatalog.isModelInstalled(applicationContext, mode)) {
+                    val msg = if (ModelCatalog.hasLegacyFp32Model(applicationContext, mode)) {
+                        "Outdated FP32 model — re-download QNN A16W16 in Manager"
+                    } else {
+                        "Model not installed ($mode)"
+                    }
                     reply?.apply {
                         writeNoException()
                         writeInt(0)
-                        writeString("Model not installed ($mode)")
+                        writeString(msg)
                     }
                     return
                 }
@@ -124,7 +129,7 @@ class KaraokeRelayService : Service() {
                     reply?.apply {
                         writeNoException()
                         writeInt(0)
-                        writeString("Failed loading QNN-HTP session ($mode)")
+                        writeString(separator.lastLoadError ?: "Failed loading QNN-HTP session ($mode)")
                     }
                     return
                 }

@@ -53,11 +53,13 @@ fun KaraokePatchControls(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
 
     var karaInstalled by remember { mutableStateOf(false) }
+    var karaLegacyFp32 by remember { mutableStateOf(false) }
     var karaSizeMb by remember { mutableStateOf(0.0) }
     var karaDownloading by remember { mutableStateOf(false) }
     var karaProgress by remember { mutableFloatStateOf(0f) }
 
     var instInstalled by remember { mutableStateOf(false) }
+    var instLegacyFp32 by remember { mutableStateOf(false) }
     var instSizeMb by remember { mutableStateOf(0.0) }
     var instDownloading by remember { mutableStateOf(false) }
     var instProgress by remember { mutableFloatStateOf(0f) }
@@ -72,13 +74,17 @@ fun KaraokePatchControls(modifier: Modifier = Modifier) {
 
     suspend fun reloadState() {
         val kInst = withContext(Dispatchers.IO) { ModelCatalog.isModelInstalled(appContext, "karaoke") }
+        val kLegacy = withContext(Dispatchers.IO) { ModelCatalog.hasLegacyFp32Model(appContext, "karaoke") }
         val kSize = withContext(Dispatchers.IO) { ModelCatalog.getModelSizeMb(appContext, "karaoke") }
         val iInst = withContext(Dispatchers.IO) { ModelCatalog.isModelInstalled(appContext, "instrumental") }
+        val iLegacy = withContext(Dispatchers.IO) { ModelCatalog.hasLegacyFp32Model(appContext, "instrumental") }
         val iSize = withContext(Dispatchers.IO) { ModelCatalog.getModelSizeMb(appContext, "instrumental") }
         val (entries, mb) = withContext(Dispatchers.IO) { KaraokeLocalServer.getCacheStats(appContext) }
         karaInstalled = kInst
+        karaLegacyFp32 = kLegacy
         karaSizeMb = kSize
         instInstalled = iInst
+        instLegacyFp32 = iLegacy
         instSizeMb = iSize
         cacheEntries = entries
         cacheMb = mb
@@ -146,6 +152,7 @@ fun KaraokePatchControls(modifier: Modifier = Modifier) {
             subtitle = when {
                 karaDownloading -> "Downloading ${(karaProgress * 100).toInt()}%..."
                 karaInstalled -> "Installed · $karaSizeMb MB"
+                karaLegacyFp32 -> "Outdated FP32 model · Tap Download for QNN A16W16"
                 else -> "Not installed"
             },
             buttonText = when {
@@ -163,6 +170,7 @@ fun KaraokePatchControls(modifier: Modifier = Modifier) {
             subtitle = when {
                 instDownloading -> "Downloading ${(instProgress * 100).toInt()}%..."
                 instInstalled -> "Installed · $instSizeMb MB"
+                instLegacyFp32 -> "Outdated FP32 model · Tap Download for QNN A16W16"
                 else -> "Not installed"
             },
             buttonText = when {
@@ -195,11 +203,16 @@ fun KaraokePatchControls(modifier: Modifier = Modifier) {
                         if (onnxArr != null) {
                             for (i in 0 until onnxArr.length()) {
                                 val o = onnxArr.getJSONObject(i)
+                                val m = if (o.optString("mode") == "instrumental") "Inst" else "Kara"
                                 if (o.optBoolean("installed", false)) {
-                                    val m = if (o.optString("mode") == "instrumental") "Inst" else "Kara"
-                                    val prov = o.optString("provider", "?")
-                                    val ms = ((o.optDouble("chunkMs", 0.0) * 10.0).roundToInt() / 10.0)
-                                    parts.add("$m: $prov ${ms}ms")
+                                    if (o.optBoolean("loaded", false)) {
+                                        val prov = o.optString("provider", "?")
+                                        val ms = ((o.optDouble("chunkMs", 0.0) * 10.0).roundToInt() / 10.0)
+                                        parts.add("$m: $prov ${ms}ms")
+                                    } else {
+                                        val err = o.optString("error", "init failed")
+                                        parts.add("$m: $err")
+                                    }
                                 }
                             }
                         }

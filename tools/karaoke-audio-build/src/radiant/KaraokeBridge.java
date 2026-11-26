@@ -4,6 +4,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.os.DeadObjectException;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -14,6 +15,7 @@ import android.util.Log;
 import android.widget.Toast;
 
 import java.nio.ByteBuffer;
+import java.util.Locale;
 
 /**
  * On-demand Android Binder + SharedMemory bridge from patched TIDAL to
@@ -31,6 +33,7 @@ public final class KaraokeBridge {
     private static final int TX_SEPARATE_PCM = IBinder.FIRST_CALL_TRANSACTION + 1;
     private static final int TX_UNLOAD = IBinder.FIRST_CALL_TRANSACTION + 2;
     private static final int TX_SEPARATE_HOP = IBinder.FIRST_CALL_TRANSACTION + 3;
+    private static final int MAX_CONSECUTIVE_FAILURES = 2;
 
     private static final Object LOCK = new Object();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -43,6 +46,8 @@ public final class KaraokeBridge {
     private static volatile int chunkFrames = 261120;
     private static volatile boolean karaInstalled = true;
     private static volatile boolean instInstalled = true;
+    private static volatile int consecutiveFailures = 0;
+    private static volatile boolean intentionalUnbind = false;
 
     private static IBinder serviceBinder;
     private static boolean bound;
@@ -61,11 +66,20 @@ public final class KaraokeBridge {
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
+            boolean shouldTrip;
+            Context ctxSnapshot;
             synchronized (LOCK) {
                 serviceBinder = null;
+                shouldTrip = enabled && !intentionalUnbind;
+                ctxSnapshot = boundContext;
                 LOCK.notifyAll();
             }
             lastProvider = "Idle";
+            if (shouldTrip) {
+                Log.w(TAG, "KaraokeRelayService disconnected unexpectedly; tripping circuit breaker");
+                tripCircuitBreaker(ctxSnapshot != null ? ctxSnapshot : appContext(),
+                        "Karaoke NPU crashed — auto-disabled");
+            }
         }
     };
 
@@ -128,14 +142,33 @@ public final class KaraokeBridge {
         KaraokeButton.syncState(next);
 
         if (next) {
+            consecutiveFailures = 0;
+            intentionalUnbind = false;
             ensureBound(app);
             String label = "instrumental".equals(mode) ? "Inst_HQ_3" : "KARA_2";
             toast(app, "Karaoke NPU: ON (" + label + ")");
         } else {
+            intentionalUnbind = true;
             unbindAndUnload();
             lastProvider = "Idle";
             toast(app, "Karaoke NPU: OFF");
         }
+    }
+
+    private static void tripCircuitBreaker(Context ctx, String reason) {
+        boolean shouldTrip;
+        synchronized (LOCK) {
+            shouldTrip = enabled;
+            if (shouldTrip) {
+                enabled = false;
+                intentionalUnbind = true;
+                lastProvider = "Error";
+            }
+        }
+        if (!shouldTrip) return;
+        KaraokeButton.syncState(false);
+        unbindAndUnload();
+        toast(ctx != null ? ctx : appContext(), reason);
     }
 
     private static void toast(final Context ctx, final String msg) {
@@ -196,6 +229,7 @@ public final class KaraokeBridge {
         Context c;
         boolean wasBound;
         synchronized (LOCK) {
+            intentionalUnbind = true;
             b = serviceBinder;
             c = boundContext;
             wasBound = bound;
@@ -276,6 +310,7 @@ public final class KaraokeBridge {
         }
         IBinder b = awaitBinder(3500L);
         if (b == null) {
+            onSeparateFailure("Karaoke NPU service unavailable", false);
             return sliceDryFallback(dryBytes, outStartFrame * 4, outByteLen);
         }
 
@@ -300,6 +335,7 @@ public final class KaraokeBridge {
 
             boolean txOk = b.transact(txCode, data, reply, 0);
             if (!txOk) {
+                onSeparateFailure("Karaoke Binder call failed", false);
                 return sliceDryFallback(dryBytes, outStartFrame * 4, outByteLen);
             }
             reply.readException();
@@ -307,8 +343,14 @@ public final class KaraokeBridge {
             if (ok != 1) {
                 String err = reply.readString();
                 Log.w(TAG, "Relay returned failure: " + err);
+                String errLower = err != null ? err.toLowerCase(Locale.US) : "";
+                boolean immediate = errLower.contains("outdated fp32")
+                        || errLower.contains("not installed")
+                        || errLower.contains("unsupported");
+                onSeparateFailure(err != null ? err : "QNN separation failed", immediate);
                 return sliceDryFallback(dryBytes, outStartFrame * 4, outByteLen);
             }
+            consecutiveFailures = 0;
             String prov = reply.readString();
             double ms = reply.readDouble();
             if (prov != null) lastProvider = prov;
@@ -318,8 +360,13 @@ public final class KaraokeBridge {
             mapped.position(0);
             mapped.get(out, 0, out.length);
             return out;
+        } catch (DeadObjectException doe) {
+            Log.w(TAG, "KaraokeRelayService died during separate: " + doe.getMessage());
+            tripCircuitBreaker(appContext(), "Karaoke NPU process died — auto-disabled");
+            return sliceDryFallback(dryBytes, outStartFrame * 4, outByteLen);
         } catch (Throwable t) {
             Log.w(TAG, "separate Binder error: " + t.getMessage());
+            onSeparateFailure("Karaoke NPU error — auto-disabled", false);
             return sliceDryFallback(dryBytes, outStartFrame * 4, outByteLen);
         } finally {
             if (mapped != null) {
@@ -330,6 +377,14 @@ public final class KaraokeBridge {
             }
             data.recycle();
             reply.recycle();
+        }
+    }
+
+    private static void onSeparateFailure(String reason, boolean immediate) {
+        if (!enabled) return;
+        int fails = immediate ? MAX_CONSECUTIVE_FAILURES : (++consecutiveFailures);
+        if (fails >= MAX_CONSECUTIVE_FAILURES) {
+            tripCircuitBreaker(appContext(), "Karaoke disabled: " + reason);
         }
     }
 
